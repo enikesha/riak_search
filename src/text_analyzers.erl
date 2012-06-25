@@ -12,8 +12,6 @@
          integer_analyzer_factory/2
         ]).
 
--define(UPPERCHAR(C),  (C >= $A andalso C =< $Z)).
--define(LOWERCHAR(C),  (C >= $a andalso C =< $z)).
 -define(NUMBER(C),     (C >= $0 andalso C =< $9)).
 -define(WHITESPACE(C), ((C == $\s) orelse (C == $\n) orelse (C == $\t) orelse (C == $\f) orelse (C == $\r) orelse (C == $\v))).
 
@@ -21,55 +19,32 @@
 %% StandardAnalyzerFactory in Lucene/Java.
 standard_analyzer_factory(Text, [MinLengthArg]) ->
     MinLength = list_to_integer(MinLengthArg),
-    {ok, standard(Text, MinLength, [], [])};
+    {ok, standard(Text, MinLength)};
 standard_analyzer_factory(Text, _Other) ->
-    {ok, standard(Text, 3, [], [])}.
+    {ok, standard(Text, 3)}.
 
-standard(<<H, T/binary>>, MinLength, Acc, ResultAcc) when ?UPPERCHAR(H) ->
-    H1 = H + ($a - $A),
-    standard(T, MinLength, [H1|Acc], ResultAcc);
-standard(<<H, T/binary>>, MinLength, Acc, ResultAcc) when ?LOWERCHAR(H) orelse ?NUMBER(H) ->
-    standard(T, MinLength, [H|Acc], ResultAcc);
-standard(<<$.,H,T/binary>>, MinLength, Acc, ResultAcc) when ?UPPERCHAR(H) ->
-    H1 = H + ($a - $A),
-    standard(T, MinLength, [H1,$.|Acc], ResultAcc);
-standard(<<$.,H,T/binary>>, MinLength, Acc, ResultAcc) when ?LOWERCHAR(H) orelse ?NUMBER(H) ->
-    standard(T, MinLength, [H,$.|Acc], ResultAcc);
-standard(<<_,T/binary>>, MinLength, Acc, ResultAcc) ->
-    standard_termify(T, MinLength, Acc, ResultAcc);
-standard(<<>>, MinLength, Acc, ResultAcc) ->
-    standard_termify(<<>>, MinLength, Acc, ResultAcc).
+standard(Text, MinLength) ->
+    [ begin
+          U = unicode:characters_to_binary(
+                ustring:tolower(W), ustring:encoding(), utf8),
+          case is_stopword(U) of
+              true -> skip;
+              false -> U
+          end
+      end
+      || W <- ubrk:words(ustring:new(Text, utf8), [skip_breaks]),
+         %% mimic org.apache.lucene.analysis.LengthFilter,
+         %% which does not incement position index
+         MinLength =< ustring:length(W, graphemes)].
 
-%% Determine if this term is valid, if so, add it to the list we are
-%% generating.
-standard_termify(<<>>, _MinLength, [], ResultAcc) ->
-    lists:reverse(ResultAcc);
-standard_termify(T, MinLength, [], ResultAcc) ->
-    standard(T, MinLength, [], ResultAcc);
-standard_termify(T, MinLength, Acc, ResultAcc) when length(Acc) < MinLength ->
-    %% mimic org.apache.lucene.analysis.LengthFilter,
-    %% which does not incement position index
-    standard(T, MinLength, [], ResultAcc);
-standard_termify(T, MinLength, Acc, ResultAcc) ->
-    Term = lists:reverse(Acc),
-    case is_stopword(Term) of
-        false ->
-            TermBinary = list_to_binary(Term),
-            NewResultAcc = [TermBinary|ResultAcc];
-        true -> 
-            NewResultAcc = [skip|ResultAcc]
-    end,
-    standard(T, MinLength, [], NewResultAcc).
-
-
-is_stopword(Term) when length(Term) == 2 -> 
-    ordsets:is_element(Term, ["an", "as", "at", "be", "by", "if", "in", "is", "it", "no", "of", "on", "or", "to"]);
-is_stopword(Term) when length(Term) == 3 -> 
-    ordsets:is_element(Term, ["and", "are", "but", "for", "not", "the", "was"]);
-is_stopword(Term) when length(Term) == 4 -> 
-    ordsets:is_element(Term, ["into", "such", "that", "then", "they", "this", "will"]);
-is_stopword(Term) when length(Term) == 5 -> 
-    ordsets:is_element(Term, ["their", "there", "these"]);
+is_stopword(Term) when size(Term) == 2 ->
+    ordsets:is_element(Term, [<<"an">>, <<"as">>, <<"at">>, <<"be">>, <<"by">>, <<"if">>, <<"in">>, <<"is">>, <<"it">>, <<"no">>, <<"of">>, <<"on">>, <<"or">>, <<"to">>]);
+is_stopword(Term) when size(Term) == 3 ->
+    ordsets:is_element(Term, [<<"and">>, <<"are">>, <<"but">>, <<"for">>, <<"not">>, <<"the">>, <<"was">>]);
+is_stopword(Term) when size(Term) == 4 ->
+    ordsets:is_element(Term, [<<"into">>, <<"such">>, <<"that">>, <<"then">>, <<"they">>, <<"this">>, <<"will">>]);
+is_stopword(Term) when size(Term) == 5 ->
+    ordsets:is_element(Term, [<<"their">>, <<"there">>, <<"these">>]);
 is_stopword(_Term) -> 
     false.
 
